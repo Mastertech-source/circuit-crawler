@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Circuit Crawler</string>
+    <string name="title_activity_main">Circuit Crawler</string>
+    <string name="package_name">com.mastertech.circuitcrawler</string>
+    <string name="custom_url_scheme">com.mastertech.circuitcrawler</string>
+</resources>
