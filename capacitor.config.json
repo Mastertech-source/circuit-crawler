@@ -1,5 +1,15 @@
 {
   "appId": "com.mastertech.circuitcrawler",
   "appName": "Circuit Crawler",
-  "webDir": "www"
+  "webDir": "www",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
+      "backgroundColor": "#1a1a1a",
+      "androidSplashResourceName": "splash",
+      "splashFullScreen": true,
+      "splashImmersive": true
+    }
+  }
 }
