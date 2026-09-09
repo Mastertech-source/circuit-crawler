@@ -7,20 +7,40 @@
 <style>
   body { margin:0; background:#1a1a1a; color:#e8d9b0; font-family:sans-serif; overflow:hidden; }
   #game { display:block; margin:0 auto; background:#0d0d0d; }
-  #ui { padding:10px; text-align:center; }
-  #log { height:80px; overflow-y:auto; padding:10px; font-size:14px; background:#111; }
-  button { padding:10px 20px; font-size:16px; margin:5px; background:#3a2f1a; color:#e8d9b0; border:1px solid #5a4a2a; border-radius:6px; }
+  #ui { padding:8px; text-align:center; }
+  #log { height:60px; overflow-y:auto; padding:8px; font-size:13px; background:#111; }
+  button { padding:10px 18px; font-size:15px; margin:5px; background:#3a2f1a; color:#e8d9b0; border:1px solid #5a4a2a; border-radius:6px; }
+  #equipped { display:flex; justify-content:center; gap:8px; padding:8px; }
+  .slot { width:50px; height:50px; border:2px solid #444; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:10px; text-align:center; background:#222; }
+  .rarity-common { border-color: #888; }
+  .rarity-uncommon { border-color: #4caf50; }
+  .rarity-rare { border-color: #4a90d9; }
+  .rarity-epic { border-color: #a64ad9; }
+  #popup { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); align-items:center; justify-content:center; flex-direction:column; z-index:10; }
+  #popupCard { background:#222; padding:20px; border-radius:10px; width:260px; text-align:center; }
+  #popupCard h3 { margin-top:0; }
+  .statline { font-size:13px; margin:4px 0; text-align:left; }
 </style>
 </head>
 <body>
 <div id="ui">
   <div id="stats">HP: <span id="hp">100</span> | Gold: <span id="gold">0</span> | Banked: <span id="banked">0</span></div>
 </div>
-<canvas id="game" width="360" height="200"></canvas>
+<div id="equipped">
+  <div class="slot" id="slot-weapon">Weapon</div>
+  <div class="slot" id="slot-armor">Armor</div>
+  <div class="slot" id="slot-trinket">Trinket</div>
+  <div class="slot" id="slot-ring">Ring</div>
+</div>
+<canvas id="game" width="360" height="140"></canvas>
 <div id="log"></div>
 <div id="ui">
   <button id="retreatBtn">Retreat (bank loot)</button>
   <button id="restartBtn" style="display:none;">Start New Run</button>
+</div>
+
+<div id="popup">
+  <div id="popupCard"></div>
 </div>
 
 <script>
@@ -32,9 +52,44 @@ const bankedEl = document.getElementById('banked');
 const logEl = document.getElementById('log');
 const retreatBtn = document.getElementById('retreatBtn');
 const restartBtn = document.getElementById('restartBtn');
+const popup = document.getElementById('popup');
+const popupCard = document.getElementById('popupCard');
 
 let banked = parseInt(localStorage.getItem('banked') || '0');
-let hero, tiles, heroPos, gold, running;
+let hero, tiles, heroPos, gold, running, equipped;
+
+const RARITIES = [
+  { name: 'common', mult: 1.0, color: '#888', weight: 60 },
+  { name: 'uncommon', mult: 1.5, color: '#4caf50', weight: 25 },
+  { name: 'rare', mult: 2.5, color: '#4a90d9', weight: 12 },
+  { name: 'epic', mult: 4.0, color: '#a64ad9', weight: 3 }
+];
+
+const ITEM_POOL = {
+  weapon: [{ name: 'Sword', stat: 'atk', base: 4 }, { name: 'Axe', stat: 'atk', base: 5 }],
+  armor: [{ name: 'Chestplate', stat: 'def', base: 3 }, { name: 'Shield', stat: 'def', base: 4 }],
+  trinket: [{ name: 'Vampiric Fang', stat: 'lifesteal', base: 5 }, { name: 'Lucky Coin', stat: 'goldfind', base: 10 }],
+  ring: [{ name: 'Iron Ring', stat: 'atk', base: 1 }, { name: 'Jade Ring', stat: 'def', base: 1 }]
+};
+
+function pickRarity() {
+  const total = RARITIES.reduce((s, r) => s + r.weight, 0);
+  let roll = Math.random() * total;
+  for (const r of RARITIES) {
+    if (roll < r.weight) return r;
+    roll -= r.weight;
+  }
+  return RARITIES[0];
+}
+
+function generateItem(slot, dungeonLevel) {
+  const pool = ITEM_POOL[slot];
+  const base = pool[Math.floor(Math.random() * pool.length)];
+  const rarity = pickRarity();
+  const itemLevel = 1 + Math.floor(dungeonLevel / 5);
+  const value = Math.round(base.base * rarity.mult * itemLevel);
+  return { slot, name: base.name, stat: base.stat, value, rarity: rarity.name, color: rarity.color, level: itemLevel };
+}
 
 function log(msg) {
   const p = document.createElement('div');
@@ -43,8 +98,30 @@ function log(msg) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+function renderSlots() {
+  ['weapon','armor','trinket','ring'].forEach(slot => {
+    const el = document.getElementById('slot-' + slot);
+    const item = equipped[slot];
+    el.className = 'slot' + (item ? ' rarity-' + item.rarity : '');
+    el.textContent = item ? item.name + ' Lv' + item.level : slot.charAt(0).toUpperCase() + slot.slice(1);
+  });
+}
+
+function computeStats() {
+  let atk = 10, def = 0, lifesteal = 0, goldfind = 0;
+  Object.values(equipped).forEach(item => {
+    if (!item) return;
+    if (item.stat === 'atk') atk += item.value;
+    if (item.stat === 'def') def += item.value;
+    if (item.stat === 'lifesteal') lifesteal += item.value;
+    if (item.stat === 'goldfind') goldfind += item.value;
+  });
+  return { atk, def, lifesteal, goldfind };
+}
+
 function newRun() {
-  hero = { hp: 100, maxHp: 100, atk: 10 };
+  hero = { hp: 100, maxHp: 100 };
+  equipped = { weapon: null, armor: null, trinket: null, ring: null };
   tiles = [];
   for (let i = 0; i < 30; i++) tiles.push({ type: i % 3 === 0 ? 'enemy' : 'road' });
   heroPos = 0;
@@ -53,7 +130,8 @@ function newRun() {
   logEl.innerHTML = '';
   restartBtn.style.display = 'none';
   retreatBtn.style.display = 'inline-block';
-  log('A new run begins...');
+  log('A new run begins... gear reset to nothing.');
+  renderSlots();
   updateUI();
   draw();
   step();
@@ -69,13 +147,17 @@ function step() {
   }
   const tile = tiles[heroPos];
   if (tile.type === 'enemy') {
+    const stats = computeStats();
     const enemyHp = 20 + heroPos * 3;
     const enemyAtk = 5 + heroPos;
     let eHp = enemyHp;
+    let healed = 0;
     while (eHp > 0 && hero.hp > 0) {
-      eHp -= hero.atk;
+      eHp -= stats.atk;
+      const lifesteal = Math.round(stats.atk * (stats.lifesteal / 100));
+      if (lifesteal > 0) { hero.hp = Math.min(hero.maxHp, hero.hp + lifesteal); healed += lifesteal; }
       if (eHp <= 0) break;
-      hero.hp -= enemyAtk;
+      hero.hp -= Math.max(1, enemyAtk - stats.def);
     }
     if (hero.hp <= 0) {
       hero.hp = 0;
@@ -85,14 +167,57 @@ function step() {
       endRun(false);
       return;
     } else {
-      const drop = 5 + Math.floor(Math.random() * 10);
+      const goldMult = 1 + (stats.goldfind / 100);
+      const drop = Math.round((5 + Math.floor(Math.random() * 10)) * goldMult);
       gold += drop;
-      log('Defeated enemy, found ' + drop + ' gold.');
+      log('Defeated enemy, found ' + drop + ' gold.' + (healed > 0 ? ' Healed ' + healed + ' HP.' : ''));
+      updateUI();
+      draw();
+      // 35% chance of a gear drop, pause game to show it
+      if (Math.random() < 0.35) {
+        const slots = ['weapon','armor','trinket','ring'];
+        const slot = slots[Math.floor(Math.random() * slots.length)];
+        const item = generateItem(slot, heroPos);
+        showLootPopup(item);
+        return; // wait for player decision before continuing
+      }
     }
   }
   updateUI();
   draw();
   setTimeout(step, 2000);
+}
+
+function showLootPopup(item) {
+  const current = equipped[item.slot];
+  let html = '<h3 style="color:' + item.color + '">' + item.name + ' (Lv' + item.level + ')</h3>';
+  html += '<div class="statline">Slot: ' + item.slot + '</div>';
+  html += '<div class="statline">Rarity: ' + item.rarity + '</div>';
+  html += '<div class="statline">' + item.stat + ': +' + item.value + '</div>';
+  if (current) {
+    html += '<hr><div class="statline">Currently equipped:</div>';
+    html += '<div class="statline">' + current.name + ' Lv' + current.level + ' (' + current.stat + ': +' + current.value + ')</div>';
+  } else {
+    html += '<hr><div class="statline">Slot is empty</div>';
+  }
+  html += '<button id="equipBtn">Equip</button><button id="skipBtn">Skip</button>';
+  popupCard.innerHTML = html;
+  popup.style.display = 'flex';
+  document.getElementById('equipBtn').onclick = () => {
+    equipped[item.slot] = item;
+    log('Equipped ' + item.name + ' (' + item.rarity + ', Lv' + item.level + ').');
+    renderSlots();
+    closePopupAndContinue();
+  };
+  document.getElementById('skipBtn').onclick = () => {
+    log('Left the ' + item.name + ' behind.');
+    closePopupAndContinue();
+  };
+}
+
+function closePopupAndContinue() {
+  popup.style.display = 'none';
+  if (running) setTimeout(step, 800);
 }
 
 function endRun(survived) {
@@ -104,7 +229,7 @@ function endRun(survived) {
     localStorage.setItem('banked', banked);
     log('Banked ' + gold + ' gold. Total banked: ' + banked);
   } else {
-    log('Run lost. Gold lost: ' + gold);
+    log('Run lost. Gold and gear lost.');
   }
   updateUI();
 }
@@ -130,11 +255,11 @@ function draw() {
     const x = i * tileW - (heroPos * tileW) + canvas.width/2;
     if (x < -tileW || x > canvas.width) continue;
     ctx.fillStyle = tiles[i].type === 'enemy' ? '#7a2e2e' : '#3a3a2a';
-    ctx.fillRect(x, 90, tileW-4, 30);
+    ctx.fillRect(x, 55, tileW-4, 30);
   }
   ctx.fillStyle = '#e8d9b0';
   ctx.beginPath();
-  ctx.arc(canvas.width/2 + tileW/2 - 2, 105, 10, 0, Math.PI*2);
+  ctx.arc(canvas.width/2 + tileW/2 - 2, 70, 10, 0, Math.PI*2);
   ctx.fill();
 }
 
